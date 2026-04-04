@@ -1,0 +1,20 @@
+[
+    {
+      "id": 7,
+      "code": "ANFA",
+      "name": "Anfa",
+      "codeParent": "CASA"
+    },
+    {
+      "id": 8,
+      "code": "SIDI-BELYOUT",
+      "name": "Sidi Belyout",
+      "codeParent": "CASA"
+    },
+    {
+      "id": 9,
+      "code": "MERS-SULTAN",
+      "name": "Mers Sultan",
+      "codeParent": "CASA"
+    }
+  ]

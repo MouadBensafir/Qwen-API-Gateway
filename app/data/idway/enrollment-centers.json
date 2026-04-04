@@ -1,0 +1,26 @@
+[
+    {
+      "id": 1,
+      "code": "ECA",
+      "name": "Enrollment Center A",
+      "email": "eca@email.com",
+      "phone": "0111111111",
+      "address": "@ Enrollment Center A",
+      "enabled": true,
+      "longitude": "44.4647452",
+      "latitude": "7.3553838",
+      "description": "Enrollment Center A"
+    },
+    {
+      "id": 3,
+      "code": "ECC",
+      "name": "Enrollment Center C",
+      "email": "ecc@email.com",
+      "phone": "0333333333",
+      "address": "@ Enrollment Center C",
+      "enabled": true,
+      "longitude": "42.4647452",
+      "latitude": "5.3553838",
+      "description": "Enrollment Center C"
+    }
+  ]

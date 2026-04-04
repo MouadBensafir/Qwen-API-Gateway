@@ -1,0 +1,17 @@
+[
+    {
+      "id": 1,
+      "code": "MAR",
+      "name": "Morocco"
+    },
+    {
+      "id": 2,
+      "code": "USA",
+      "name": "America"
+    },
+    {
+      "id": 3,
+      "code": "FRA",
+      "name": "France"
+    }
+  ]
