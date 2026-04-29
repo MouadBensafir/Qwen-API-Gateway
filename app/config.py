@@ -22,7 +22,9 @@ DEFAULT_CONFIG = {
             "Use `list_services` before suggesting services, `get_service_details` to determine step order, "
             "`get_form_fields` and `validate_form_field` for form collection, and the appointment tools for location, date, and time selection. "
             "Ask one focused question at a time, keep the flow concise, summarize before submission, and only call "
-            "`submit_service_request` after the user explicitly confirms they want to submit."
+            "`submit_service_request` after the user explicitly confirms they want to submit. "
+            "When `submit_service_request` succeeds, give one brief final confirmation that includes the reference number and saved summary file path, "
+            "then end the flow by asking if the user wants to do something else. Do not continue collecting data after a successful submission."
         ),
         "memorySummaryPrompt": (
             "Summarize the useful durable context from this conversation for a follow-up assistant turn. "
@@ -35,9 +37,13 @@ DEFAULT_CONFIG = {
     "ollama": {
         "url": "http://127.0.0.1:11434",
         "model": "qwen3.5",
+        "numCtx": 4096,
         "requestTimeoutSeconds": 120,
         "maxContextChars": 16000,
         "recentMessageCount": 8,
+        "compactTriggerChars": 12000,
+        "toolResultMaxChars": 2500,
+        "toolResultMaxItems": 8,
     },
 }
 
@@ -102,6 +108,17 @@ REQUEST_TIMEOUT_SECONDS = float(
         ),
     )
 )
+OLLAMA_NUM_CTX = int(
+    os.getenv(
+        "OLLAMA_NUM_CTX",
+        str(
+            OLLAMA_CONFIG.get(
+                "numCtx",
+                DEFAULT_CONFIG["ollama"]["numCtx"],
+            )
+        ),
+    )
+)
 MAX_CONTEXT_CHARS = int(
     os.getenv(
         "OLLAMA_MAX_CONTEXT_CHARS",
@@ -113,6 +130,17 @@ MAX_CONTEXT_CHARS = int(
         ),
     )
 )
+COMPACT_TRIGGER_CHARS = int(
+    os.getenv(
+        "OLLAMA_COMPACT_TRIGGER_CHARS",
+        str(
+            OLLAMA_CONFIG.get(
+                "compactTriggerChars",
+                DEFAULT_CONFIG["ollama"]["compactTriggerChars"],
+            )
+        ),
+    )
+)
 RECENT_MESSAGE_COUNT = int(
     os.getenv(
         "OLLAMA_RECENT_MESSAGE_COUNT",
@@ -120,6 +148,28 @@ RECENT_MESSAGE_COUNT = int(
             OLLAMA_CONFIG.get(
                 "recentMessageCount",
                 DEFAULT_CONFIG["ollama"]["recentMessageCount"],
+            )
+        ),
+    )
+)
+TOOL_RESULT_MAX_CHARS = int(
+    os.getenv(
+        "OLLAMA_TOOL_RESULT_MAX_CHARS",
+        str(
+            OLLAMA_CONFIG.get(
+                "toolResultMaxChars",
+                DEFAULT_CONFIG["ollama"]["toolResultMaxChars"],
+            )
+        ),
+    )
+)
+TOOL_RESULT_MAX_ITEMS = int(
+    os.getenv(
+        "OLLAMA_TOOL_RESULT_MAX_ITEMS",
+        str(
+            OLLAMA_CONFIG.get(
+                "toolResultMaxItems",
+                DEFAULT_CONFIG["ollama"]["toolResultMaxItems"],
             )
         ),
     )

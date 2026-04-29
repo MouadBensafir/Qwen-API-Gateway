@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json
+from copy import deepcopy
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from .config import TOOL_RESULT_MAX_CHARS, TOOL_RESULT_MAX_ITEMS
@@ -18,6 +21,8 @@ from .idway_data import (
     validate_form_field,
 )
 from .session_store import SessionState, record_submission
+
+SUBMISSIONS_DIR = Path(__file__).resolve().parent / "data" / "idway" / "submissions"
 
 
 def tool_list_services(include_disabled: bool = False) -> dict[str, Any]:
@@ -60,8 +65,95 @@ def tool_get_available_time_slots(code: str, enrollment_center_code: str, date: 
     return {"ok": True, "availability": get_enrollment_center_times(code, enrollment_center_code, date)}
 
 
+def _find_by_code(items: list[dict[str, Any]], code: str) -> dict[str, Any] | None:
+    return next((item for item in items if str(item.get("code")) == code), None)
+
+
+def _build_submission_snapshot(code: str, payload: dict[str, Any], submission: dict[str, Any]) -> dict[str, Any]:
+    form_fields = get_form_fields(code)
+    countries = get_countries()
+
+    country = _find_by_code(countries, str(payload.get("countryCode") or ""))
+    regions = []
+    if country is not None:
+        try:
+            regions = get_regions(str(country.get("code")))
+        except Exception:
+            regions = []
+
+    region = _find_by_code(regions, str(payload.get("regionCode") or ""))
+    towns = []
+    if region is not None:
+        try:
+            towns = get_towns(str(region.get("code")))
+        except Exception:
+            towns = []
+
+    town = _find_by_code(towns, str(payload.get("townCode") or ""))
+    center = None
+    town_code = str(payload.get("townCode") or "")
+    if town_code:
+        try:
+            centers = get_enrollment_centers(town_code)
+            center = _find_by_code(centers, str(payload.get("enrollmentCenterCode") or ""))
+        except Exception:
+            center = None
+
+    form_values: dict[str, Any] = {}
+    for field in form_fields:
+        field_code = str(field.get("code") or "")
+        if field_code and field_code in payload:
+            form_values[field_code] = payload[field_code]
+
+    appointment = {
+        "countryCode": payload.get("countryCode"),
+        "countryName": country.get("name") if country else None,
+        "regionCode": payload.get("regionCode"),
+        "regionName": region.get("name") if region else None,
+        "townCode": payload.get("townCode"),
+        "townName": town.get("name") if town else None,
+        "enrollmentCenterCode": payload.get("enrollmentCenterCode"),
+        "enrollmentCenterName": center.get("name") if center else None,
+        "date": payload.get("date"),
+        "time": payload.get("time"),
+    }
+
+    extracted_user = {
+        "uin": payload.get("uin"),
+        "firstName": payload.get("firstName"),
+        "lastName": payload.get("lastName"),
+        "birthDate": payload.get("birthDate"),
+    }
+
+    return {
+        "generatedAt": datetime.now(timezone.utc).isoformat(),
+        "referenceNumber": submission.get("referenceNumber"),
+        "serviceCode": code,
+        "message": submission.get("message"),
+        "user": extracted_user,
+        "formData": form_values,
+        "appointment": appointment,
+        "submittedPayload": deepcopy(payload),
+    }
+
+
+def _write_submission_snapshot(session_id: str | None, submission: dict[str, Any], snapshot: dict[str, Any]) -> str:
+    SUBMISSIONS_DIR.mkdir(parents=True, exist_ok=True)
+    safe_session_id = session_id or "anonymous"
+    safe_reference = str(submission.get("referenceNumber") or "submission")
+    filename = f"{safe_session_id}-{safe_reference}.json".replace("/", "-").replace("\\", "-")
+    output_path = SUBMISSIONS_DIR / filename
+    output_path.write_text(json.dumps(snapshot, ensure_ascii=False, indent=2), encoding="utf-8")
+    return str(output_path)
+
+
 def tool_submit_service_request(code: str, payload: dict[str, Any], session: SessionState | None = None) -> dict[str, Any]:
     submission = build_submission(code, payload)
+    snapshot = _build_submission_snapshot(code, payload, submission)
+    output_path = _write_submission_snapshot(session.session_id if session is not None else None, submission, snapshot)
+    submission["summaryFile"] = output_path
+    submission["conversationClosed"] = True
+    submission["nextPrompt"] = "Ask the user if they want to do something else."
     if session is not None:
         record_submission(session, submission)
     return submission

@@ -55,6 +55,7 @@ async def chat(request: PromptRequest) -> PromptResponse:
 
     try:
         response = None
+        forced_final_response: str | None = None
         for _ in range(MAX_TOOL_ROUNDS):
             await compact_session_if_needed(session)
             response = await asyncio.to_thread(ollama_chat, session.messages)
@@ -81,7 +82,14 @@ async def chat(request: PromptRequest) -> PromptResponse:
                         "content": build_tool_result_message(tool_result),
                     }
                 )
+                forced_final_response = build_forced_final_response(tool_result)
+                if forced_final_response:
+                    session.messages.append({"role": "assistant", "content": forced_final_response})
+                    response = {"message": {"content": forced_final_response}}
+                    break
                 await compact_session_if_needed(session)
+            if forced_final_response:
+                break
 
         if response is None:
             raise RuntimeError("No response returned from Ollama.")
@@ -98,6 +106,26 @@ async def chat(request: PromptRequest) -> PromptResponse:
         raise HTTPException(status_code=502, detail="Ollama returned an empty response.")
 
     return PromptResponse(session_id=session.session_id, response=text, model=OLLAMA_MODEL)
+
+
+def build_forced_final_response(tool_result: dict[str, Any]) -> str | None:
+    if tool_result.get("tool") != "submit_service_request":
+        return None
+
+    result = tool_result.get("result", {})
+    if not isinstance(result, dict) or not result.get("conversationClosed"):
+        return None
+
+    reference_number = str(result.get("referenceNumber") or "").strip()
+    summary_file = str(result.get("summaryFile") or "").strip()
+    if not reference_number:
+        return None
+
+    message = f"Your request has been submitted successfully. Reference number: {reference_number}."
+    if summary_file:
+        message += f" I saved a summary JSON file to {summary_file}."
+    message += " Would you like to do something else?"
+    return message
 
 
 @app.delete("/sessions/{session_id}", response_model=DeleteSessionResponse)
