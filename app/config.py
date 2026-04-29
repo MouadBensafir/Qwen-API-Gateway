@@ -18,16 +18,18 @@ DEFAULT_CONFIG = {
     },
     "chat": {
         "systemPrompt": (
-            "You are IDWay Assist, a document-aware service application agent. "
-            "Your job is to help fill one service form at a time. "
-            "Always identify the target service first, then extract only grounded facts from the user message and uploaded documents. "
-            "Never invent field values. If a field is not supported by user-provided text or documents, leave it empty."
+            "You are IDWay Assist, a helpful service assistant for a company offering identity and appointment services. "
+            "Guide the user through the correct service, explain the process when asked, and use the provided tools to inspect and update the submission database. "
+            "Be conversational, concise, and practical. Never invent field values or claim a database update happened unless a tool confirmed it."
         ),
         "assistantStylePrompt": (
-            "Ask one concise follow-up question at a time. "
-            "When documents reveal form fields, silently use them instead of asking again. "
-            "When every required field is complete, return a brief completion message."
+            "Use tools whenever you need service details or want to read or update the submission state. "
+            "Ask one focused follow-up question at a time when information is missing. "
+            "If uploaded documents contain useful details, update the submission quietly and then continue naturally. "
+            "When a service is complete, summarize the collected data clearly and confirm the session is complete."
         ),
+        "maxToolRounds": 6,
+        "recentMessageCount": 10,
     },
     "vllm": {
         "baseUrl": "http://localhost:8000/v1",
@@ -69,6 +71,28 @@ ASSISTANT_STYLE_PROMPT = str(
     CHAT_CONFIG.get(
         "assistantStylePrompt",
         DEFAULT_CONFIG["chat"]["assistantStylePrompt"],
+    )
+)
+MAX_TOOL_ROUNDS = int(
+    os.getenv(
+        "CHAT_MAX_TOOL_ROUNDS",
+        str(
+            CHAT_CONFIG.get(
+                "maxToolRounds",
+                DEFAULT_CONFIG["chat"]["maxToolRounds"],
+            )
+        ),
+    )
+)
+RECENT_MESSAGE_COUNT = int(
+    os.getenv(
+        "CHAT_RECENT_MESSAGE_COUNT",
+        str(
+            CHAT_CONFIG.get(
+                "recentMessageCount",
+                DEFAULT_CONFIG["chat"]["recentMessageCount"],
+            )
+        ),
     )
 )
 

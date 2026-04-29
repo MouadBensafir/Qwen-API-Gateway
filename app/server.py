@@ -11,12 +11,14 @@ from starlette.datastructures import UploadFile as StarletteUploadFile
 
 from .config import (
     ASSISTANT_STYLE_PROMPT,
+    MAX_TOOL_ROUNDS,
+    RECENT_MESSAGE_COUNT,
     SUBMISSIONS_DIR,
     SYSTEM_PROMPT,
     TEMPLATES_DIR,
     VLLM_MODEL,
 )
-from .document_utils import DocumentPayload, build_document_payload
+from .document_utils import build_document_payload
 from .models import DeleteSessionResponse, PromptRequest, PromptResponse
 from .session_store import (
     SessionState,
@@ -25,10 +27,10 @@ from .session_store import (
     get_session_count,
     update_session_state,
 )
-from .vllm_client import vllm_chat
+from .vllm_client import vllm_chat_completion
 
 
-app = FastAPI(title="IDWay Assist Agent", version="2.0.0")
+app = FastAPI(title="IDWay Assist Agent", version="3.0.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -39,35 +41,59 @@ app.add_middleware(
 )
 
 
-SERVICE_TEMPLATES = {
-    "ID Renewal": "id_renewal.json",
-    "VISA Appointment": "visa_appointment.json",
-    "Driving License Renewal": "driving_license_renewal.json",
-}
-
-SERVICE_QUESTIONS = {
+SERVICE_CATALOG = {
     "ID Renewal": {
-        "Full Name": "What is your full name as it should appear on the renewal request?",
-        "Date of Birth": "What is your date of birth?",
-        "Current ID Number": "What is your current ID number?",
-        "Expiry Date": "What is the expiry date on your current ID?",
-        "Address": "What is your current address?",
-        "Blood Type": "What is your blood type?",
+        "template": "id_renewal.json",
+        "description": "Renew an existing ID card by confirming personal details and current document information.",
+        "process": [
+            "Select the renewal service.",
+            "Provide or extract identity details from the current document.",
+            "Confirm personal details and current address.",
+            "Review the collected data and complete the request.",
+        ],
+        "questions": {
+            "Full Name": "What is your full name as it should appear on the renewal request?",
+            "Date of Birth": "What is your date of birth?",
+            "Current ID Number": "What is your current ID number?",
+            "Expiry Date": "What is the expiry date on your current ID?",
+            "Address": "What is your current address?",
+            "Blood Type": "What is your blood type?",
+        },
     },
     "VISA Appointment": {
-        "Full Name": "What is your full name as it appears on your passport?",
-        "Passport Number": "What is your passport number?",
-        "Nationality": "What is your nationality?",
-        "Destination Country": "Which country are you traveling to?",
-        "Purpose of Travel": "What is the purpose of your travel?",
-        "Desired Appointment Date": "What appointment date would you prefer?",
+        "template": "visa_appointment.json",
+        "description": "Book a visa appointment by collecting passport details, travel purpose, and a preferred appointment date.",
+        "process": [
+            "Choose the visa appointment service.",
+            "Provide passport and nationality information.",
+            "Specify destination country and travel purpose.",
+            "Pick the desired appointment date and review the request.",
+        ],
+        "questions": {
+            "Full Name": "What is your full name as it appears on your passport?",
+            "Passport Number": "What is your passport number?",
+            "Nationality": "What is your nationality?",
+            "Destination Country": "Which country are you traveling to?",
+            "Purpose of Travel": "What is the purpose of your travel?",
+            "Desired Appointment Date": "What appointment date would you prefer?",
+        },
     },
     "Driving License Renewal": {
-        "Full Name": "What is your full name as it appears on your license?",
-        "License Number": "What is your license number?",
-        "Vehicle Class": "What vehicle class is on your license?",
-        "Issue Date": "What is the issue date on your current license?",
-        "Vision Test Status": "What is your current vision test status?",
+        "template": "driving_license_renewal.json",
+        "description": "Renew a driving license by confirming license details, vehicle class, and vision status.",
+        "process": [
+            "Select the driving license renewal service.",
+            "Provide license details or upload the current license.",
+            "Confirm vehicle class and issue date.",
+            "Confirm vision test status and review the request.",
+        ],
+        "questions": {
+            "Full Name": "What is your full name as it appears on your license?",
+            "License Number": "What is your license number?",
+            "Vehicle Class": "What vehicle class is on your license?",
+            "Issue Date": "What is the issue date on your current license?",
+            "Vision Test Status": "What is your current vision test status?",
+        },
     },
 }
 
@@ -78,9 +104,103 @@ SERVICE_ALIASES = {
     "visa appointment": "VISA Appointment",
     "visa": "VISA Appointment",
     "driving license renewal": "Driving License Renewal",
-    "license renewal": "Driving License Renewal",
     "driver license renewal": "Driving License Renewal",
+    "license renewal": "Driving License Renewal",
 }
+
+ASSISTANT_TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "list_services",
+            "description": "List all available company services with short descriptions.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_service_details",
+            "description": "Get the description, process, required fields, and current questions for a service.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "service_name": {
+                        "type": "string",
+                        "description": "Canonical service name.",
+                    }
+                },
+                "required": ["service_name"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "select_service",
+            "description": "Select a service for the current session and create its submission record if needed.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "service_name": {
+                        "type": "string",
+                        "description": "Canonical service name or close alias.",
+                    }
+                },
+                "required": ["service_name"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_submission_state",
+            "description": "Read the current submission database record for this session, including filled and missing fields.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "update_submission_fields",
+            "description": "Update one or more form fields in the current submission database using grounded user or document data.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "fields": {
+                        "type": "object",
+                        "description": "Map of field name to extracted value.",
+                        "additionalProperties": {"type": "string"},
+                    }
+                },
+                "required": ["fields"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "complete_service_request",
+            "description": "Mark the current service request complete if no required fields are missing.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": False,
+            },
+        },
+    },
+]
 
 
 @app.on_event("startup")
@@ -95,7 +215,7 @@ async def healthcheck() -> dict[str, Any]:
         "status": "ok",
         "model": VLLM_MODEL,
         "sessions": get_session_count(),
-        "services": list(SERVICE_TEMPLATES.keys()),
+        "services": list(SERVICE_CATALOG.keys()),
     }
 
 
@@ -107,7 +227,7 @@ async def chat(request: Request) -> PromptResponse:
     if session.completed:
         return PromptResponse(
             session_id=session.session_id,
-            response="This conversation session is already complete. Start a new session or reset the current one to request another service.",
+            response="This session is already complete. Start a new session if you need another service.",
             model=VLLM_MODEL,
             service_name=session.service_name,
             submission_path=session.submission_path,
@@ -116,83 +236,28 @@ async def chat(request: Request) -> PromptResponse:
         )
 
     document_payload = await build_document_payload(files)
-    current_form = load_current_form(session)
-    extracted_turn = await extract_turn_data(
-        session=session,
-        prompt=prompt,
-        current_form=current_form,
-        document_payload=document_payload,
-    )
-
-    selected_service = session.service_name or extracted_turn.get("service_name") or detect_service_from_text(prompt)
-    if selected_service and selected_service not in SERVICE_TEMPLATES:
-        selected_service = None
-
-    if not selected_service:
-        response_text = build_service_selection_message()
-        update_session_state(
-            session,
-            message={
-                "role": "assistant",
-                "content": response_text,
-            },
-        )
-        return PromptResponse(
-            session_id=session.session_id,
-            response=response_text,
-            model=VLLM_MODEL,
-            missing_fields=[],
-        )
-
-    if session.service_name != selected_service or not session.submission_path:
-        submission_path = create_submission_from_template(session.session_id, selected_service)
-        update_session_state(
-            session,
-            service_name=selected_service,
-            submission_path=str(submission_path),
-        )
-
-    form_data = load_current_form(session)
-    applied_updates = apply_field_updates(form_data, extracted_turn.get("field_updates", {}))
-    save_current_form(session, form_data)
-
-    missing_fields = get_missing_fields(form_data)
-    if not missing_fields:
-        response_text = build_completion_message(selected_service, form_data, applied_updates)
-        update_session_state(
-            session,
-            completed=True,
-            message={"role": "assistant", "content": response_text},
-        )
-        return PromptResponse(
-            session_id=session.session_id,
-            response=response_text,
-            model=VLLM_MODEL,
-            service_name=selected_service,
-            submission_path=session.submission_path,
-            completed=True,
-            missing_fields=[],
-        )
-
-    response_text = build_follow_up_message(
-        service_name=selected_service,
-        form_data=form_data,
-        missing_fields=missing_fields,
-        applied_updates=applied_updates,
-        document_payload=document_payload,
-    )
+    user_content = build_user_content(prompt, document_payload)
+    session_user_summary = build_session_user_summary(prompt, document_payload.filenames)
     update_session_state(
         session,
-        message={"role": "assistant", "content": response_text},
+        message={"role": "user", "content": session_user_summary},
     )
+
+    response_text = await run_assistant_turn(
+        session=session,
+        user_content=user_content,
+    )
+
+    form_data = load_current_form(session)
+    missing_fields = get_missing_fields(form_data or {})
 
     return PromptResponse(
         session_id=session.session_id,
         response=response_text,
         model=VLLM_MODEL,
-        service_name=selected_service,
+        service_name=session.service_name,
         submission_path=session.submission_path,
-        completed=False,
+        completed=session.completed,
         missing_fields=missing_fields,
     )
 
@@ -225,42 +290,136 @@ async def parse_chat_request(request: Request) -> tuple[str | None, str, bool, l
     return payload.session_id, payload.prompt.strip(), payload.reset, []
 
 
-async def extract_turn_data(
+async def run_assistant_turn(
     *,
     session: SessionState,
-    prompt: str,
-    current_form: dict[str, Any] | None,
-    document_payload: DocumentPayload,
-) -> dict[str, Any]:
-    available_services = "\n".join(f"- {service}" for service in SERVICE_TEMPLATES)
-    current_service = session.service_name or "None"
-    current_form_json = json.dumps(current_form or {}, ensure_ascii=False, indent=2)
+    user_content: list[dict[str, Any]],
+) -> str:
+    messages = build_llm_messages(session=session, user_content=user_content)
 
-    content_parts: list[dict[str, Any]] = [
+    for _ in range(MAX_TOOL_ROUNDS):
+        completion = await vllm_chat_completion(
+            messages,
+            tools=ASSISTANT_TOOLS,
+            temperature=0.1,
+        )
+        message = completion.choices[0].message
+        assistant_content = extract_message_content(message)
+        assistant_tool_calls = list(getattr(message, "tool_calls", None) or [])
+
+        assistant_message_payload: dict[str, Any] = {
+            "role": "assistant",
+        }
+        if assistant_content:
+            assistant_message_payload["content"] = assistant_content
+        if assistant_tool_calls:
+            assistant_message_payload["tool_calls"] = [tool_call.model_dump() for tool_call in assistant_tool_calls]
+
+        messages.append(assistant_message_payload)
+
+        if not assistant_tool_calls:
+            final_text = assistant_content.strip()
+            if not final_text:
+                raise HTTPException(status_code=502, detail="vLLM returned an empty response.")
+            update_session_state(session, message={"role": "assistant", "content": final_text})
+            return final_text
+
+        for tool_call in assistant_tool_calls:
+            tool_result = execute_tool_call(session=session, tool_call=tool_call)
+            messages.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": tool_call.id,
+                    "content": json.dumps(tool_result, ensure_ascii=False),
+                }
+            )
+            update_session_state(
+                session,
+                message={
+                    "role": "tool",
+                    "content": summarize_tool_result(tool_result),
+                },
+            )
+
+    raise HTTPException(status_code=502, detail="vLLM exceeded the maximum tool rounds.")
+
+
+def build_llm_messages(session: SessionState, user_content: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    state_summary = build_state_summary(session)
+    history_messages = build_history_messages(session)
+
+    return [
+        {
+            "role": "system",
+            "content": (
+                f"{SYSTEM_PROMPT}\n\n"
+                f"{ASSISTANT_STYLE_PROMPT}\n\n"
+                "Rules:\n"
+                "- Use tools to inspect services and to read or modify submission state.\n"
+                "- Use `select_service` before updating fields if no service is active.\n"
+                "- Use `get_submission_state` before asking a new question when you need to verify what is still missing.\n"
+                "- Use `update_submission_fields` to save grounded details from the user or uploaded documents.\n"
+                "- If the user asks what a service includes, use `get_service_details` and explain it clearly.\n"
+                "- When no service has been chosen yet, help the user choose by name and explain the options.\n"
+                "- Do not mention internal tool names to the user.\n"
+            ),
+        },
+        {
+            "role": "system",
+            "content": state_summary,
+        },
+        *history_messages,
+        {
+            "role": "user",
+            "content": user_content,
+        },
+    ]
+
+
+def build_state_summary(session: SessionState) -> str:
+    form_data = load_current_form(session)
+    missing_fields = get_missing_fields(form_data or {})
+    service_name = session.service_name or "None"
+    submission_path = session.submission_path or "None"
+    form_json = json.dumps(form_data or {}, ensure_ascii=False)
+
+    return (
+        "Current session state:\n"
+        f"- Service: {service_name}\n"
+        f"- Submission path: {submission_path}\n"
+        f"- Completed: {session.completed}\n"
+        f"- Missing fields: {', '.join(missing_fields) if missing_fields else 'None'}\n"
+        f"- Stored submission JSON: {form_json}"
+    )
+
+
+def build_history_messages(session: SessionState) -> list[dict[str, Any]]:
+    raw_messages = session.messages
+    if raw_messages and str(raw_messages[-1].get("role") or "").strip().lower() == "user":
+        raw_messages = raw_messages[:-1]
+    raw_messages = raw_messages[-RECENT_MESSAGE_COUNT:]
+    formatted_messages: list[dict[str, Any]] = []
+
+    for message in raw_messages:
+        role = str(message.get("role") or "").strip().lower()
+        content = normalize_optional_string(message.get("content")) or ""
+        if not role or not content:
+            continue
+        if role not in {"user", "assistant"}:
+            continue
+        formatted_messages.append({"role": role, "content": content})
+
+    return formatted_messages
+
+
+def build_user_content(prompt: str, document_payload: Any) -> list[dict[str, Any]]:
+    content_parts: list[dict[str, Any]] = []
+    content_parts.append(
         {
             "type": "text",
-            "text": (
-                f"{SYSTEM_PROMPT}\n\n"
-                "Extract service intent and grounded field values.\n"
-                "Return only valid JSON with this shape:\n"
-                '{'
-                '"service_name": "ID Renewal|VISA Appointment|Driving License Renewal|null", '
-                '"field_updates": {"Field Name": "value"}, '
-                '"notes": "short note"'
-                '}\n\n'
-                f"Available services:\n{available_services}\n\n"
-                f"Current selected service: {current_service}\n"
-                f"Current form state:\n{current_form_json}\n\n"
-                "Rules:\n"
-                f"- Conversation style: {ASSISTANT_STYLE_PROMPT}\n"
-                "- If a service is already selected, keep it unless the user clearly requests a different one.\n"
-                "- Only populate fields that are explicitly stated in the user text or visible in uploaded documents.\n"
-                "- Do not invent or normalize missing values beyond obvious whitespace cleanup.\n"
-                "- If nothing is extractable for a field, omit it from field_updates.\n"
-                f"User message:\n{prompt or '[no text provided]'}"
-            ),
+            "text": prompt or "No text message was provided. Use the uploaded documents if relevant.",
         }
-    ]
+    )
 
     for text_block in document_payload.text_blocks:
         content_parts.append(
@@ -271,25 +430,145 @@ async def extract_turn_data(
         )
 
     content_parts.extend(document_payload.vision_parts)
+    return content_parts
 
-    raw_response = await vllm_chat(
-        [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": content_parts},
+
+def build_session_user_summary(prompt: str, filenames: list[str]) -> str:
+    prompt_text = prompt or "No text message."
+    if not filenames:
+        return prompt_text
+    return f"{prompt_text}\nUploaded files: {', '.join(filenames)}"
+
+
+def execute_tool_call(session: SessionState, tool_call: Any) -> dict[str, Any]:
+    function_name = str(tool_call.function.name or "").strip()
+    arguments = parse_json_object(str(tool_call.function.arguments or "{}"))
+
+    if function_name == "list_services":
+        services = [
+            {
+                "name": service_name,
+                "description": service_config["description"],
+            }
+            for service_name, service_config in SERVICE_CATALOG.items()
         ]
-    )
-    parsed = parse_json_object(raw_response)
+        return {"ok": True, "services": services}
 
-    service_name = normalize_service_name(parsed.get("service_name"))
-    field_updates = parsed.get("field_updates")
-    if not isinstance(field_updates, dict):
-        field_updates = {}
+    if function_name == "get_service_details":
+        service_name = normalize_service_name(arguments.get("service_name"))
+        if not service_name:
+            return {"ok": False, "error": "Unknown service name."}
+        return {
+            "ok": True,
+            "service": build_service_details(service_name),
+        }
+
+    if function_name == "select_service":
+        service_name = normalize_service_name(arguments.get("service_name"))
+        if not service_name:
+            return {"ok": False, "error": "Unknown service name."}
+
+        if session.service_name != service_name or not session.submission_path:
+            submission_path = create_submission_from_template(session.session_id, service_name)
+            update_session_state(
+                session,
+                service_name=service_name,
+                submission_path=str(submission_path),
+            )
+
+        form_data = load_current_form(session) or {}
+        return {
+            "ok": True,
+            "service_name": service_name,
+            "submission_path": session.submission_path,
+            "state": describe_submission_state(service_name, form_data),
+        }
+
+    if function_name == "get_submission_state":
+        form_data = load_current_form(session)
+        return {
+            "ok": True,
+            "service_name": session.service_name,
+            "submission_path": session.submission_path,
+            "state": describe_submission_state(session.service_name, form_data or {}),
+        }
+
+    if function_name == "update_submission_fields":
+        if not session.service_name:
+            return {"ok": False, "error": "No service selected yet."}
+
+        form_data = load_current_form(session)
+        if form_data is None:
+            return {"ok": False, "error": "No submission database exists for this session."}
+
+        fields = arguments.get("fields")
+        if not isinstance(fields, dict):
+            return {"ok": False, "error": "The fields argument must be an object."}
+
+        applied_updates = apply_field_updates(form_data, fields)
+        save_current_form(session, form_data)
+
+        return {
+            "ok": True,
+            "service_name": session.service_name,
+            "updated_fields": applied_updates,
+            "state": describe_submission_state(session.service_name, form_data),
+        }
+
+    if function_name == "complete_service_request":
+        form_data = load_current_form(session)
+        missing_fields = get_missing_fields(form_data or {})
+        if missing_fields:
+            return {
+                "ok": False,
+                "error": "The service is not complete yet.",
+                "missing_fields": missing_fields,
+            }
+
+        update_session_state(session, completed=True)
+        return {
+            "ok": True,
+            "service_name": session.service_name,
+            "submission_path": session.submission_path,
+            "state": describe_submission_state(session.service_name, form_data or {}),
+            "completed": True,
+        }
+
+    return {"ok": False, "error": f"Unknown tool: {function_name}"}
+
+
+def build_service_details(service_name: str) -> dict[str, Any]:
+    service_config = SERVICE_CATALOG[service_name]
+    return {
+        "name": service_name,
+        "description": service_config["description"],
+        "process": service_config["process"],
+        "required_fields": list(service_config["questions"].keys()),
+        "next_questions": service_config["questions"],
+    }
+
+
+def describe_submission_state(service_name: str | None, form_data: dict[str, Any]) -> dict[str, Any]:
+    missing_fields = get_missing_fields(form_data)
+    filled_fields = {
+        key: value
+        for key, value in form_data.items()
+        if isinstance(value, str) and value.strip()
+    }
 
     return {
         "service_name": service_name,
-        "field_updates": field_updates,
-        "notes": str(parsed.get("notes") or "").strip(),
+        "filled_fields": filled_fields,
+        "missing_fields": missing_fields,
+        "next_question": get_next_question(service_name, missing_fields),
+        "is_complete": not missing_fields,
     }
+
+
+def get_next_question(service_name: str | None, missing_fields: list[str]) -> str | None:
+    if not service_name or not missing_fields:
+        return None
+    return SERVICE_CATALOG[service_name]["questions"].get(missing_fields[0])
 
 
 def load_current_form(session: SessionState) -> dict[str, Any] | None:
@@ -320,8 +599,8 @@ def save_current_form(session: SessionState, form_data: dict[str, Any]) -> None:
 
 
 def create_submission_from_template(session_id: str, service_name: str) -> Path:
-    template_filename = SERVICE_TEMPLATES[service_name]
-    template_path = TEMPLATES_DIR / template_filename
+    service_config = SERVICE_CATALOG[service_name]
+    template_path = TEMPLATES_DIR / str(service_config["template"])
     if not template_path.exists():
         raise HTTPException(status_code=500, detail=f"Template not found for {service_name}.")
 
@@ -366,49 +645,46 @@ def get_missing_fields(form_data: dict[str, Any]) -> list[str]:
     return missing_fields
 
 
-def build_service_selection_message() -> str:
-    return (
-        "Which service do you need?\n"
-        "1. ID Renewal\n"
-        "2. VISA Appointment\n"
-        "3. Driving License Renewal"
-    )
+def extract_message_content(message: Any) -> str:
+    content = getattr(message, "content", None)
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if isinstance(item, dict) and item.get("type") == "text":
+                parts.append(str(item.get("text") or ""))
+            else:
+                text_value = getattr(item, "text", None)
+                if isinstance(text_value, str):
+                    parts.append(text_value)
+        return "\n".join(part for part in parts if part).strip()
+    return str(content or "").strip()
 
 
-def build_follow_up_message(
-    *,
-    service_name: str,
-    form_data: dict[str, Any],
-    missing_fields: list[str],
-    applied_updates: list[str],
-    document_payload: DocumentPayload,
-) -> str:
-    next_field = missing_fields[0]
-    question = SERVICE_QUESTIONS[service_name][next_field]
+def summarize_tool_result(tool_result: dict[str, Any]) -> str:
+    if tool_result.get("ok") is False:
+        return f"Tool error: {tool_result.get('error')}"
 
-    preface_parts = [f"Service selected: {service_name}."]
-    if document_payload.filenames:
-        preface_parts.append(f"Processed document(s): {', '.join(document_payload.filenames)}.")
-    if applied_updates:
-        preface_parts.append(f"Updated: {', '.join(applied_updates)}.")
+    service_name = normalize_optional_string(tool_result.get("service_name"))
+    state = tool_result.get("state")
+    if isinstance(state, dict):
+        missing_fields = state.get("missing_fields")
+        updated_fields = tool_result.get("updated_fields")
+        summary_parts = []
+        if service_name:
+            summary_parts.append(f"Service: {service_name}.")
+        if isinstance(updated_fields, list) and updated_fields:
+            summary_parts.append(f"Updated fields: {', '.join(str(item) for item in updated_fields)}.")
+        if isinstance(missing_fields, list):
+            summary_parts.append(
+                "Missing fields: "
+                + (", ".join(str(item) for item in missing_fields) if missing_fields else "none")
+                + "."
+            )
+        return " ".join(summary_parts).strip() or json.dumps(tool_result, ensure_ascii=False)
 
-    remaining = ", ".join(missing_fields)
-    preface_parts.append(f"Remaining fields: {remaining}.")
-    preface_parts.append(question)
-    return " ".join(preface_parts)
-
-
-def build_completion_message(service_name: str, form_data: dict[str, Any], applied_updates: list[str]) -> str:
-    lines = [f"{key}: {value}" for key, value in form_data.items()]
-    response = [
-        f"{service_name} is complete.",
-    ]
-    if applied_updates:
-        response.append(f"Latest update: {', '.join(applied_updates)}.")
-    response.append("Collected data:")
-    response.extend(lines)
-    response.append("This session is now closed.")
-    return "\n".join(response)
+    return json.dumps(tool_result, ensure_ascii=False)
 
 
 def parse_json_object(raw_text: str) -> dict[str, Any]:
@@ -433,20 +709,12 @@ def parse_json_object(raw_text: str) -> dict[str, Any]:
     return parsed
 
 
-def detect_service_from_text(prompt: str) -> str | None:
-    lowered = prompt.lower()
-    for alias, service_name in SERVICE_ALIASES.items():
-        if alias in lowered:
-            return service_name
-    return None
-
-
 def normalize_service_name(value: Any) -> str | None:
     normalized = normalize_optional_string(value)
     if normalized is None:
         return None
 
-    if normalized in SERVICE_TEMPLATES:
+    if normalized in SERVICE_CATALOG:
         return normalized
 
     return SERVICE_ALIASES.get(normalized.lower())
@@ -458,7 +726,6 @@ def normalize_optional_string(value: Any) -> str | None:
     if isinstance(value, str):
         cleaned = value.strip()
         return cleaned or None
-
     cleaned = str(value).strip()
     return cleaned or None
 

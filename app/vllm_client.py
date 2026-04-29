@@ -21,18 +21,25 @@ client = AsyncOpenAI(
 )
 
 
-async def vllm_chat(
+async def vllm_chat_completion(
     messages: list[dict[str, Any]],
     *,
+    tools: list[dict[str, Any]] | None = None,
+    tool_choice: str | dict[str, Any] | None = None,
     model: str | None = None,
     max_tokens: int | None = None,
     temperature: float | None = None,
-) -> str:
-    response = await client.chat.completions.create(
-        model=model or VLLM_MODEL,
-        messages=messages,
-        max_tokens=max_tokens or MAX_COMPLETION_TOKENS,
-        temperature=VLLM_TEMPERATURE if temperature is None else temperature,
-    )
+) -> Any:
+    request_kwargs: dict[str, Any] = {
+        "model": model or VLLM_MODEL,
+        "messages": messages,
+        "max_tokens": max_tokens or MAX_COMPLETION_TOKENS,
+        "temperature": VLLM_TEMPERATURE if temperature is None else temperature,
+    }
 
-    return str(response.choices[0].message.content or "").strip()
+    if tools:
+        request_kwargs["tools"] = tools
+    if tool_choice is not None:
+        request_kwargs["tool_choice"] = tool_choice
+
+    return await client.chat.completions.create(**request_kwargs)
