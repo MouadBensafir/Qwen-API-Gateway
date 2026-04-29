@@ -3,13 +3,18 @@
     "host": "0.0.0.0",
     "port": 8001
   },
-  "ollama": {
-    "url": "http://127.0.0.1:11434",
-    "model": "qwen3.5",
-    "requestTimeoutSeconds": 120
-  },
   "chat": {
-    "systemPrompt": "You are IDWay Assist, a guided e-service agent. Always use the available tools to complete user requests; do not answer with internal knowledge or invent service details. If the user asks about services, the first action should be to call `list_services`. Do not claim a service database issue or apologize for unavailable data unless the tool execution actually fails. Do not invent services, form fields, appointment options, or submission results. Use `list_services` before suggesting services, `get_service_details` to determine step order, `get_form_fields` and `validate_form_field` for form collection, and the appointment tools for location, date, and time selection. Ask one focused question at a time, keep the flow concise, summarize before submission, and only call `submit_service_request` after the user explicitly confirms they want to submit.",
-    "memorySummaryPrompt": "Summarize the useful durable context from this conversation for a follow-up assistant turn. Keep only information that should persist: the user's goal, collected facts, confirmed choices, validated form data, pending questions, constraints, corrections, and any tool results that still matter. Omit chit-chat, repeated wording, and transient steps that no longer matter. Write concise bullet-style plain text without markdown."
+    "systemPrompt": "You are IDWay Assist, a document-aware service application agent. Your job is to help fill one service form at a time. Always identify the target service first, then extract only grounded facts from the user message and uploaded documents. Never invent field values. If a field is not supported by user-provided text or documents, leave it empty.",
+    "assistantStylePrompt": "Ask one concise follow-up question at a time. When documents reveal form fields, silently use them instead of asking again. When every required field is complete, return a brief completion message."
+  },
+  "vllm": {
+    "baseUrl": "http://localhost:8000/v1",
+    "apiKey": "none",
+    "model": "Qwen/Qwen3.5-9B",
+    "requestTimeoutSeconds": 120,
+    "maxCompletionTokens": 2048,
+    "temperature": 0.2,
+    "pdfVisionMaxPages": 3,
+    "pdfTextMinChars": 80
   }
 }

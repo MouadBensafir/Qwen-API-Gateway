@@ -30,6 +30,18 @@ python run.py
 
 Default server port is `8001`, configured in `config.json`.
 
+Chat and memory behavior are configured in `config.json`:
+
+- `chat.maxToolRounds`: maximum assistant/tool loop iterations per request
+- `chat.systemPrompt`: the main assistant system prompt
+- `chat.memorySummaryPrompt`: the prompt used to compress older conversation history
+- `ollama.numCtx`: Ollama `num_ctx` setting. Lower this to reduce VRAM usage.
+- `ollama.maxContextChars`: approximate conversation size threshold before history is compacted
+- `ollama.compactTriggerChars`: early compaction threshold before the hard history cap is reached
+- `ollama.recentMessageCount`: how many recent raw messages remain after older turns are summarized
+- `ollama.toolResultMaxChars`: maximum tool-result text retained in history
+- `ollama.toolResultMaxItems`: maximum items retained per list/object inside tool results
+
 ## Test with curl
 
 Health check:
@@ -65,4 +77,5 @@ The `/chat` route now exposes IDWay business tools to Qwen through Ollama functi
 - submit a mock request once the user confirms the summary
 
 Sessions are stored in memory, so they reset when the backend process restarts.
-"# E-services-Guide-API" 
+When a session grows too large, the backend summarizes older useful context into a compact memory block and keeps only the most recent turns verbatim before continuing.
+Tool results are also compacted before they are written back into session history so repeated lookups do not exhaust the model context.
