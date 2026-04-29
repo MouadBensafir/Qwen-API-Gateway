@@ -31,13 +31,13 @@ DEFAULT_CONFIG = {
         "maxToolRounds": 6,
         "recentMessageCount": 10,
     },
-    "vllm": {
-        "baseUrl": "http://localhost:8000/v1",
-        "apiKey": "none",
-        "model": "Qwen/Qwen3.5-9B",
+    "ollama": {
+        "url": "http://localhost:11434",
+        "model": "qwen3.5",
         "requestTimeoutSeconds": 120,
         "maxCompletionTokens": 2048,
         "temperature": 0.2,
+        "numCtx": 8192,
         "pdfVisionMaxPages": 3,
         "pdfTextMinChars": 80,
     },
@@ -59,7 +59,7 @@ def load_config() -> dict[str, Any]:
 
 CONFIG = load_config()
 CHAT_CONFIG = CONFIG.get("chat", {})
-VLLM_CONFIG = CONFIG.get("vllm", {})
+OLLAMA_CONFIG = CONFIG.get("ollama", {})
 
 SYSTEM_PROMPT = str(
     CHAT_CONFIG.get(
@@ -96,47 +96,54 @@ RECENT_MESSAGE_COUNT = int(
     )
 )
 
-VLLM_BASE_URL = os.getenv(
-    "VLLM_BASE_URL",
-    str(VLLM_CONFIG.get("baseUrl", DEFAULT_CONFIG["vllm"]["baseUrl"])),
+OLLAMA_URL = os.getenv(
+    "OLLAMA_URL",
+    str(OLLAMA_CONFIG.get("url", DEFAULT_CONFIG["ollama"]["url"])),
 )
-VLLM_API_KEY = os.getenv(
-    "VLLM_API_KEY",
-    str(VLLM_CONFIG.get("apiKey", DEFAULT_CONFIG["vllm"]["apiKey"])),
-)
-VLLM_MODEL = os.getenv(
-    "VLLM_MODEL",
-    str(VLLM_CONFIG.get("model", DEFAULT_CONFIG["vllm"]["model"])),
+OLLAMA_MODEL = os.getenv(
+    "OLLAMA_MODEL",
+    str(OLLAMA_CONFIG.get("model", DEFAULT_CONFIG["ollama"]["model"])),
 )
 REQUEST_TIMEOUT_SECONDS = float(
     os.getenv(
-        "VLLM_TIMEOUT_SECONDS",
+        "OLLAMA_TIMEOUT_SECONDS",
         str(
-            VLLM_CONFIG.get(
+            OLLAMA_CONFIG.get(
                 "requestTimeoutSeconds",
-                DEFAULT_CONFIG["vllm"]["requestTimeoutSeconds"],
+                DEFAULT_CONFIG["ollama"]["requestTimeoutSeconds"],
             )
         ),
     )
 )
 MAX_COMPLETION_TOKENS = int(
     os.getenv(
-        "VLLM_MAX_COMPLETION_TOKENS",
+        "OLLAMA_MAX_COMPLETION_TOKENS",
         str(
-            VLLM_CONFIG.get(
+            OLLAMA_CONFIG.get(
                 "maxCompletionTokens",
-                DEFAULT_CONFIG["vllm"]["maxCompletionTokens"],
+                DEFAULT_CONFIG["ollama"]["maxCompletionTokens"],
             )
         ),
     )
 )
-VLLM_TEMPERATURE = float(
+OLLAMA_TEMPERATURE = float(
     os.getenv(
-        "VLLM_TEMPERATURE",
+        "OLLAMA_TEMPERATURE",
         str(
-            VLLM_CONFIG.get(
+            OLLAMA_CONFIG.get(
                 "temperature",
-                DEFAULT_CONFIG["vllm"]["temperature"],
+                DEFAULT_CONFIG["ollama"]["temperature"],
+            )
+        ),
+    )
+)
+OLLAMA_NUM_CTX = int(
+    os.getenv(
+        "OLLAMA_NUM_CTX",
+        str(
+            OLLAMA_CONFIG.get(
+                "numCtx",
+                DEFAULT_CONFIG["ollama"]["numCtx"],
             )
         ),
     )
@@ -145,9 +152,9 @@ PDF_VISION_MAX_PAGES = int(
     os.getenv(
         "PDF_VISION_MAX_PAGES",
         str(
-            VLLM_CONFIG.get(
+            OLLAMA_CONFIG.get(
                 "pdfVisionMaxPages",
-                DEFAULT_CONFIG["vllm"]["pdfVisionMaxPages"],
+                DEFAULT_CONFIG["ollama"]["pdfVisionMaxPages"],
             )
         ),
     )
@@ -156,9 +163,9 @@ PDF_TEXT_MIN_CHARS = int(
     os.getenv(
         "PDF_TEXT_MIN_CHARS",
         str(
-            VLLM_CONFIG.get(
+            OLLAMA_CONFIG.get(
                 "pdfTextMinChars",
-                DEFAULT_CONFIG["vllm"]["pdfTextMinChars"],
+                DEFAULT_CONFIG["ollama"]["pdfTextMinChars"],
             )
         ),
     )

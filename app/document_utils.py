@@ -3,7 +3,7 @@ from __future__ import annotations
 import base64
 from dataclasses import dataclass, field
 
-import fitz
+import pymupdf
 from fastapi import HTTPException, UploadFile
 
 from .config import PDF_TEXT_MIN_CHARS, PDF_VISION_MAX_PAGES
@@ -45,7 +45,7 @@ async def build_document_payload(files: list[UploadFile]) -> DocumentPayload:
 
 def _extract_pdf_payload(file_bytes: bytes) -> DocumentPayload:
     payload = DocumentPayload()
-    with fitz.open(stream=file_bytes, filetype="pdf") as pdf_document:
+    with pymupdf.open(stream=file_bytes, filetype="pdf") as pdf_document:
         extracted_pages: list[str] = []
         for page in pdf_document:
             page_text = page.get_text("text").strip()

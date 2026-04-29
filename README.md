@@ -1,15 +1,15 @@
 # Backend
 
-This backend is a standalone FastAPI service that uses a local vLLM OpenAI-compatible endpoint.
+This backend is a standalone FastAPI service that uses a local Ollama instance running `qwen3.5`.
 
 ## Files
 
-- `config.json`: backend server and vLLM settings
+- `config.json`: backend server and Ollama settings
 - `app/config.py`: config loading and shared constants
 - `app/models.py`: request and response schemas
 - `app/session_store.py`: in-memory conversation state
 - `app/document_utils.py`: image/PDF extraction helpers
-- `app/vllm_client.py`: AsyncOpenAI client for vLLM
+- `app/ollama_client.py`: Ollama chat client and message normalization
 - `app/server.py`: FastAPI routes and tool-driven service assistant
 - `run.py`: local runner
 - `requirements.txt`: Python dependencies
@@ -25,7 +25,11 @@ py -3 -m pip install -r requirements.txt
 
 ## Run
 
-Start vLLM first, then run:
+Start Ollama first and make sure the model is available, then run:
+
+```bash
+ollama pull qwen3.5
+```
 
 ```bash
 cd backend
@@ -44,14 +48,14 @@ Default backend port is `8001`.
 - `chat.assistantStylePrompt`
 - `chat.maxToolRounds`
 - `chat.recentMessageCount`
-- `vllm.baseUrl`
-- `vllm.apiKey`
-- `vllm.model`
-- `vllm.requestTimeoutSeconds`
-- `vllm.maxCompletionTokens`
-- `vllm.temperature`
-- `vllm.pdfVisionMaxPages`
-- `vllm.pdfTextMinChars`
+- `ollama.url`
+- `ollama.model`
+- `ollama.requestTimeoutSeconds`
+- `ollama.maxCompletionTokens`
+- `ollama.temperature`
+- `ollama.numCtx`
+- `ollama.pdfVisionMaxPages`
+- `ollama.pdfTextMinChars`
 
 ## API
 

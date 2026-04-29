@@ -9,13 +9,13 @@
     "maxToolRounds": 6,
     "recentMessageCount": 10
   },
-  "vllm": {
-    "baseUrl": "http://localhost:8000/v1",
-    "apiKey": "none",
-    "model": "Qwen/Qwen3.5-9B",
+  "ollama": {
+    "url": "http://localhost:11434",
+    "model": "qwen3.5",
     "requestTimeoutSeconds": 120,
     "maxCompletionTokens": 2048,
     "temperature": 0.2,
+    "numCtx": 8192,
     "pdfVisionMaxPages": 3,
     "pdfTextMinChars": 80
   }

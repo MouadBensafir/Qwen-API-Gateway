@@ -12,14 +12,15 @@ from starlette.datastructures import UploadFile as StarletteUploadFile
 from .config import (
     ASSISTANT_STYLE_PROMPT,
     MAX_TOOL_ROUNDS,
+    OLLAMA_MODEL,
     RECENT_MESSAGE_COUNT,
     SUBMISSIONS_DIR,
     SYSTEM_PROMPT,
     TEMPLATES_DIR,
-    VLLM_MODEL,
 )
 from .document_utils import build_document_payload
 from .models import DeleteSessionResponse, PromptRequest, PromptResponse
+from .ollama_client import ollama_chat_completion
 from .session_store import (
     SessionState,
     delete_session,
@@ -27,7 +28,6 @@ from .session_store import (
     get_session_count,
     update_session_state,
 )
-from .vllm_client import vllm_chat_completion
 
 
 app = FastAPI(title="IDWay Assist Agent", version="3.0.0")
@@ -213,7 +213,7 @@ async def startup_event() -> None:
 async def healthcheck() -> dict[str, Any]:
     return {
         "status": "ok",
-        "model": VLLM_MODEL,
+        "model": OLLAMA_MODEL,
         "sessions": get_session_count(),
         "services": list(SERVICE_CATALOG.keys()),
     }
@@ -228,7 +228,7 @@ async def chat(request: Request) -> PromptResponse:
         return PromptResponse(
             session_id=session.session_id,
             response="This session is already complete. Start a new session if you need another service.",
-            model=VLLM_MODEL,
+            model=OLLAMA_MODEL,
             service_name=session.service_name,
             submission_path=session.submission_path,
             completed=True,
@@ -254,7 +254,7 @@ async def chat(request: Request) -> PromptResponse:
     return PromptResponse(
         session_id=session.session_id,
         response=response_text,
-        model=VLLM_MODEL,
+        model=OLLAMA_MODEL,
         service_name=session.service_name,
         submission_path=session.submission_path,
         completed=session.completed,
@@ -298,14 +298,14 @@ async def run_assistant_turn(
     messages = build_llm_messages(session=session, user_content=user_content)
 
     for _ in range(MAX_TOOL_ROUNDS):
-        completion = await vllm_chat_completion(
+        completion = await ollama_chat_completion(
             messages,
             tools=ASSISTANT_TOOLS,
             temperature=0.1,
         )
-        message = completion.choices[0].message
+        message = completion.get("message") or {}
         assistant_content = extract_message_content(message)
-        assistant_tool_calls = list(getattr(message, "tool_calls", None) or [])
+        assistant_tool_calls = list(message.get("tool_calls") or [])
 
         assistant_message_payload: dict[str, Any] = {
             "role": "assistant",
@@ -313,14 +313,14 @@ async def run_assistant_turn(
         if assistant_content:
             assistant_message_payload["content"] = assistant_content
         if assistant_tool_calls:
-            assistant_message_payload["tool_calls"] = [tool_call.model_dump() for tool_call in assistant_tool_calls]
+            assistant_message_payload["tool_calls"] = assistant_tool_calls
 
         messages.append(assistant_message_payload)
 
         if not assistant_tool_calls:
             final_text = assistant_content.strip()
             if not final_text:
-                raise HTTPException(status_code=502, detail="vLLM returned an empty response.")
+                raise HTTPException(status_code=502, detail="Ollama returned an empty response.")
             update_session_state(session, message={"role": "assistant", "content": final_text})
             return final_text
 
@@ -329,7 +329,7 @@ async def run_assistant_turn(
             messages.append(
                 {
                     "role": "tool",
-                    "tool_call_id": tool_call.id,
+                    "tool_name": get_tool_call_name(tool_call),
                     "content": json.dumps(tool_result, ensure_ascii=False),
                 }
             )
@@ -341,7 +341,7 @@ async def run_assistant_turn(
                 },
             )
 
-    raise HTTPException(status_code=502, detail="vLLM exceeded the maximum tool rounds.")
+    raise HTTPException(status_code=502, detail="Ollama exceeded the maximum tool rounds.")
 
 
 def build_llm_messages(session: SessionState, user_content: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -441,8 +441,12 @@ def build_session_user_summary(prompt: str, filenames: list[str]) -> str:
 
 
 def execute_tool_call(session: SessionState, tool_call: Any) -> dict[str, Any]:
-    function_name = str(tool_call.function.name or "").strip()
-    arguments = parse_json_object(str(tool_call.function.arguments or "{}"))
+    function_payload = tool_call.get("function") if isinstance(tool_call, dict) else None
+    if not isinstance(function_payload, dict):
+        return {"ok": False, "error": "Malformed tool call payload."}
+
+    function_name = str(function_payload.get("name") or "").strip()
+    arguments = parse_tool_arguments(function_payload.get("arguments"))
 
     if function_name == "list_services":
         services = [
@@ -646,7 +650,10 @@ def get_missing_fields(form_data: dict[str, Any]) -> list[str]:
 
 
 def extract_message_content(message: Any) -> str:
-    content = getattr(message, "content", None)
+    if isinstance(message, dict):
+        content = message.get("content")
+    else:
+        content = getattr(message, "content", None)
     if isinstance(content, str):
         return content
     if isinstance(content, list):
@@ -660,6 +667,13 @@ def extract_message_content(message: Any) -> str:
                     parts.append(text_value)
         return "\n".join(part for part in parts if part).strip()
     return str(content or "").strip()
+
+
+def get_tool_call_name(tool_call: dict[str, Any]) -> str:
+    function_payload = tool_call.get("function")
+    if not isinstance(function_payload, dict):
+        return ""
+    return str(function_payload.get("name") or "").strip()
 
 
 def summarize_tool_result(tool_result: dict[str, Any]) -> str:
@@ -707,6 +721,12 @@ def parse_json_object(raw_text: str) -> dict[str, Any]:
     if not isinstance(parsed, dict):
         return {}
     return parsed
+
+
+def parse_tool_arguments(raw_arguments: Any) -> dict[str, Any]:
+    if isinstance(raw_arguments, dict):
+        return raw_arguments
+    return parse_json_object(str(raw_arguments or "{}"))
 
 
 def normalize_service_name(value: Any) -> str | None:
